@@ -1,13 +1,25 @@
 // index.ts
-import { serve } from "https://deno.land/std@0.131.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.178.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  Keypair,
+  Server,
+  Networks,
+  TransactionBuilder,
+  Operation,
+  Asset,
+} from "npm:stellar-sdk@10.1.0";
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// USSD Handler
+// Initialize Stellar server (Testnet)
+const stellarServer = new Server("https://horizon-testnet.stellar.org");
+const networkPassphrase = Networks.TESTNET;
+
+// Start serving the USSD function
 serve(async (req) => {
   try {
     // Parse the form data sent by Africa's Talking
@@ -24,7 +36,7 @@ serve(async (req) => {
     console.log("Phone Number:", phoneNumber);
     console.log("Text:", text);
 
-    // Normalize the phone number (if needed)
+    // Normalize the phone number
     const normalizedPhoneNumber = normalizePhoneNumber(phoneNumber);
 
     // Split the text input into an array for navigation
@@ -45,21 +57,34 @@ serve(async (req) => {
       // User selected 'Check Balance'
       console.log("User selected 'Check Balance'");
 
-      // Fetch user's balance from the database
+      // Fetch user's Stellar public key from the database
       const { data: userData, error } = await supabase
         .from("users")
-        .select("balance")
+        .select("stellar_public_key")
         .eq("phone_number", normalizedPhoneNumber)
         .maybeSingle();
 
       if (error) {
         console.error("Error fetching user data:", error);
         response = `END An error occurred while fetching your balance.`;
-      } else if (!userData) {
+      } else if (!userData || !userData.stellar_public_key) {
         console.log("No account found for phone number:", normalizedPhoneNumber);
         response = `END No account found for this phone number.`;
       } else {
-        response = `END Your balance is $${userData.balance}`;
+        try {
+          // Load user's Stellar account
+          const account = await stellarServer.loadAccount(userData.stellar_public_key);
+          const balances = account.balances;
+          const nativeBalance = balances.find(
+            (balance: any) => balance.asset_type === "native"
+          );
+
+          const balanceAmount = nativeBalance ? nativeBalance.balance : "0";
+          response = `END Your balance is ${balanceAmount} XLM`;
+        } catch (stellarError) {
+          console.error("Error fetching Stellar account:", stellarError);
+          response = `END An error occurred while fetching your balance.`;
+        }
       }
     } else if (text.startsWith("2")) {
       // User selected 'Send Money'
@@ -84,7 +109,7 @@ serve(async (req) => {
         } else {
           // Confirm the transaction
           const recipientPhone = normalizePhoneNumber(textArray[1]);
-          response = `CON Confirm sending $${amount} to ${recipientPhone}?
+          response = `CON Confirm sending ${amount} XLM to ${recipientPhone}?
 1. Yes
 2. No`;
         }
@@ -100,13 +125,13 @@ serve(async (req) => {
           // Fetch sender and recipient from the database
           const { data: senderData, error: senderError } = await supabase
             .from("users")
-            .select("*")
+            .select("stellar_public_key")
             .eq("phone_number", normalizedPhoneNumber)
             .maybeSingle();
 
           const { data: recipientData, error: recipientError } = await supabase
             .from("users")
-            .select("*")
+            .select("stellar_public_key")
             .eq("phone_number", recipientPhone)
             .maybeSingle();
 
@@ -116,53 +141,93 @@ serve(async (req) => {
           } else if (recipientError) {
             console.error("Error fetching recipient data:", recipientError);
             response = `END An error occurred while processing your request.`;
-          } else if (!senderData) {
+          } else if (!senderData || !senderData.stellar_public_key) {
             console.log(
-              "Sender account not found:",
+              "Sender account not found or missing Stellar credentials:",
               normalizedPhoneNumber
             );
-            response = `END Sender account not found.`;
-          } else if (senderData.balance < amount) {
-            response = `END Insufficient balance.`;
-          } else if (!recipientData) {
+            response = `END Sender account not found or credentials missing.`;
+          } else if (!recipientData || !recipientData.stellar_public_key) {
             console.log("Recipient account not found:", recipientPhone);
             response = `END Recipient not found.`;
           } else {
-            // Update balances
-            const { error: updateError } = await supabase.from("users").update([
-              { balance: senderData.balance - amount },
-            ])
-            .eq("phone_number", normalizedPhoneNumber);
+            // Retrieve sender's secret key from environment variable
+            const senderStellarSecret = Deno.env.get("STELLAR_SENDER_SECRET");
+            if (!senderStellarSecret) {
+              console.error(
+                "Sender's Stellar secret key not found in environment variables."
+              );
+              response = `END An error occurred while processing your request.`;
+              return new Response(response, {
+                headers: { "Content-Type": "text/plain" },
+              });
+            }
 
-            if (updateError) {
-              console.error("Error updating sender balance:", updateError);
-              response = `END An error occurred during the transaction.`;
-            } else {
-              const { error: recipientUpdateError } = await supabase.from("users").update([
-                { balance: recipientData.balance + amount },
-              ])
-              .eq("phone_number", recipientPhone);
+            // Derive the public key from the secret key
+            const senderKeypair = Keypair.fromSecret(senderStellarSecret);
+            const derivedPublicKey = senderKeypair.publicKey();
+            console.log("Derived Public Key:", derivedPublicKey);
+            console.log("Stored Public Key:", senderData.stellar_public_key);
 
-              if (recipientUpdateError) {
-                console.error("Error updating recipient balance:", recipientUpdateError);
-                response = `END An error occurred during the transaction.`;
+            // Verify that the derived public key matches the stored public key
+            if (derivedPublicKey !== senderData.stellar_public_key) {
+              console.error(
+                "Mismatch between derived public key and stored public key."
+              );
+              response = `END Configuration error. Please contact support.`;
+              return new Response(response, {
+                headers: { "Content-Type": "text/plain" },
+              });
+            }
+
+            try {
+              // Load sender's Stellar account
+              const account = await stellarServer.loadAccount(derivedPublicKey);
+
+              // Fetch base fee and convert it to string
+              const fee = (await stellarServer.fetchBaseFee()).toString();
+
+              // Build the transaction
+              const transaction = new TransactionBuilder(account, {
+                fee,
+                networkPassphrase,
+              })
+                .addOperation(
+                  Operation.payment({
+                    destination: recipientData.stellar_public_key,
+                    asset: Asset.native(),
+                    amount: amount.toString(),
+                  })
+                )
+                .setTimeout(30)
+                .build();
+
+              // Sign the transaction
+              transaction.sign(senderKeypair);
+
+              // Submit the transaction
+              const txResult = await stellarServer.submitTransaction(transaction);
+              console.log("Transaction successful:", txResult.hash);
+
+              // Record the transaction
+              const { error: transactionError } = await supabase.from("transactions").insert([
+                {
+                  from_phone_number: normalizedPhoneNumber,
+                  to_phone_number: recipientPhone,
+                  amount,
+                  tx_hash: txResult.hash,
+                },
+              ]);
+
+              if (transactionError) {
+                console.error("Error recording transaction:", transactionError);
+                response = `END Transaction successful, but failed to record it.`;
               } else {
-                // Record the transaction
-                const { error: transactionError } = await supabase.from("transactions").insert([
-                  {
-                    from_phone_number: normalizedPhoneNumber,
-                    to_phone_number: recipientPhone,
-                    amount,
-                  },
-                ]);
-
-                if (transactionError) {
-                  console.error("Error recording transaction:", transactionError);
-                  response = `END Transaction successful, but failed to record it.`;
-                } else {
-                  response = `END Transaction successful!`;
-                }
+                response = `END Transaction successful!`;
               }
+            } catch (stellarError) {
+              console.error("Transaction failed:", stellarError);
+              response = `END Transaction failed. Please try again.`;
             }
           }
         } else if (confirmation === "2") {
@@ -172,7 +237,7 @@ serve(async (req) => {
           response = `END Invalid input.`;
         }
       } else {
-        response = `END Invalid input.`;
+        response = `END Invalid option.`;
       }
     } else {
       response = `END Invalid option.`;
