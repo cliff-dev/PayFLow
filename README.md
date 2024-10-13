@@ -1,143 +1,79 @@
-Stellar USSD Service
-A USSD-based financial service built with Deno, Supabase, and Stellar SDKs. This service allows users to register, check their Stellar account balances, and send money using Stellar assets.
+# Stellar USSD Service
 
-Table of Contents
-Features
-Tech Stack
-Packages Used
-Prerequisites
-Setup
-Environment Variables
-Database Schema
-Running the Service
-USSD Flow
-Security Considerations
-Features
-User Registration:
+A USSD-based financial service built with **Deno**, **Supabase**, and **Stellar SDKs**. This service allows users to register, check their Stellar account balances, and send money using Stellar assets.
 
-Register with phone number and set a PIN.
-Generates a Stellar keypair for the user.
-Funds the Stellar account with XLM via Friendbot.
-Existing User Functions:
+## Table of Contents
 
-Check Balance: View XLM, USDC, or EURC balances.
-Send Money: Transfer XLM, USDC, or EURC to other registered users.
-Exit: Terminate the USSD session.
-Tech Stack
-Deno: A secure runtime for JavaScript and TypeScript, used to run the server handling USSD requests.
-Supabase: An open-source Firebase alternative, used for managing user data and authentication.
-Stellar SDK: Facilitates interactions with the Stellar network, enabling account creation, funding, and transactions.
-Packages Used
-Deno Standard Library (std/http/server.ts):
+- [Features](#features)
+- [Tech Stack & Implementation](#tech-stack--implementation)
+  - [Deno Edge Functions](#deno-edge-functions)
+  - [Supabase](#supabase)
+  - [Stellar SDK](#stellar-sdk)
+  - [Africa's Talking](#africas-talking)
+- [Packages Used](#packages-used)
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+- [Environment Variables](#environment-variables)
+- [Database Schema](#database-schema)
+- [Running the Service](#running-the-service)
+- [USSD Flow](#ussd-flow)
+- [Security Considerations](#security-considerations)
 
-Handles incoming HTTP requests to process USSD interactions.
-Supabase JS Client (@supabase/supabase-js@2):
+## Features
 
-Manages database operations such as inserting new users and querying existing user data.
-Stellar SDK (stellar-sdk@10.1.0):
+### User Registration
+- **Register** with phone number and set a PIN.
+- **Generates** a Stellar keypair for the user.
+- **Funds** the Stellar account with XLM via Friendbot.
 
-Handles Stellar network interactions, including keypair generation, account funding, and processing transactions.
-Prerequisites
-Deno Installed: Install Deno
-Supabase Account: Sign up and create a new project at Supabase
-Stellar Testnet Account: Use Friendbot to fund Stellar accounts on the Testnet.
-USSD Gateway: Set up with a provider like Africa's Talking to handle USSD requests.
-Setup
-Clone the Repository:
+### Existing User Functions
+- **Check Balance**: View XLM, USDC, or EURC balances.
+- **Send Money**: Transfer XLM, USDC, or EURC to other registered users.
+- **Exit**: Terminate the USSD session.
 
-bash
-Copy code
-git clone https://github.com/yourusername/stellar-ussd-service.git
-cd stellar-ussd-service
-Install Dependencies:
+## Tech Stack & Implementation
 
-Deno manages dependencies via URLs, so no traditional npm install is required. Ensure you have an active internet connection when running the service.
+### Deno Edge Functions
+- **Usage**: Utilized Deno's runtime to deploy edge functions that handle incoming USSD requests.
+- **Implementation**: The `serve` function from Deno's standard library listens for HTTP requests from Africa's Talking, processes the USSD logic, and responds accordingly.
 
-Environment Variables
-Create a .env file in the root directory and add the following variables:
+### Supabase
+- **Usage**: Acts as the backend database to store user information, including phone numbers, Stellar public keys, wallet balances, and PINs.
+- **Implementation**: The `@supabase/supabase-js@2` client manages database operations such as inserting new users and querying existing user data.
 
-env
-Copy code
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
-Notes:
+### Stellar SDK
+- **Usage**: Facilitates interactions with the Stellar Testnet, enabling account creation, funding, and asset transactions (XLM, USDC, EURC).
+- **Implementation**:
+  - **Keypair Generation**: Creates unique Stellar keypairs for each user upon registration.
+  - **Account Funding**: Uses Friendbot to fund user accounts with XLM.
+  - **Asset Management**: Defines and manages custom assets (USDC, EURC) for transactions.
 
-Replace your_supabase_url and your_supabase_service_role_key with your actual Supabase project credentials.
-Ensure .env is added to .gitignore to prevent sensitive information from being committed.
-Database Schema
-Ensure your Supabase users table includes the following fields:
+### Africa's Talking
+- **Usage**: Serves as the USSD gateway, enabling users to interact with the service via their mobile phones using USSD codes (e.g., `*123#`).
+- **Implementation**: Africa's Talking sends HTTP POST requests to the Deno edge functions with user inputs, which are then processed to perform the desired actions.
 
-phone_number (string, unique): User's phone number.
-stellar_public_key (string): User's Stellar public key.
-preferred_currency (string): User's preferred currency.
-wallet_balance (json): Contains balances for XLM, USDC, and EURC.
-pin (string): User's PIN for authentication.
-Example:
+## Packages Used
 
-json
-Copy code
-{
-  "phone_number": "+1234567890",
-  "stellar_public_key": "GABCDEF1234567890...",
-  "preferred_currency": "XLM",
-  "wallet_balance": {
-    "XLM": "100",
-    "USDC": "100",
-    "EURC": "100"
-  },
-  "pin": "1234"
-}
-Running the Service
-Start the Deno server with the necessary permissions:
+1. **Deno Standard Library (`std/http/server.ts`)**
+   - **Purpose**: Handles incoming HTTP requests to process USSD interactions.
 
-bash
-Copy code
-deno run --allow-net --allow-env index.ts
-Flags:
+2. **Supabase JS Client (`@supabase/supabase-js@2`)**
+   - **Purpose**: Manages database operations such as inserting new users and querying existing user data.
 
---allow-net: Grants network access.
---allow-env: Allows access to environment variables.
-For production deployments, consider using serverless platforms like Supabase Functions or Deno Deploy.
+3. **Stellar SDK (`stellar-sdk@10.1.0`)**
+   - **Purpose**: Handles Stellar network interactions, including keypair generation, account funding, and processing transactions.
 
-USSD Flow
-1. Registration
-Initiate Registration:
+## Prerequisites
 
-Dial the USSD code (e.g., *123#).
-Select option 1 to Register.
-Provide Phone Number:
+- **Deno Installed**: [Install Deno](https://deno.land/#installation)
+- **Supabase Account**: Sign up and create a new project at [Supabase](https://supabase.com/)
+- **Stellar Testnet Account**: Use [Friendbot](https://www.stellar.org/developers/tools/friendbot.html) to fund Stellar accounts on the Testnet.
+- **USSD Gateway**: Set up with a provider like [Africa's Talking](https://africastalking.com/) to handle USSD requests.
 
-Enter your phone number in the format +1234567890.
-Set PIN:
+## Setup
 
-Enter a 4 to 6-digit PIN.
-Registration Confirmation:
+1. **Clone the Repository**
 
-Receive a confirmation message with your Stellar Public Key and XLM funding status.
-vbnet
-Copy code
-END Registration successful!
-Your Stellar Public Key: GABCDEF1234567890...
-Your account has been funded with XLM on Testnet. You can now use the service.
-2. Existing User Functions
-Login:
-
-Dial the USSD code.
-Select option 2 for Existing User.
-Enter your registered phone number.
-Enter your PIN.
-Main Menu:
-
-1. Check Balance: View balances for XLM, USDC, or EURC.
-2. Send Money: Transfer XLM, USDC, or EURC to other users.
-3. Exit: Terminate the session.
-Security Considerations
-Sensitive Data Storage:
-Stellar Public Keys: Stored in Supabase for transaction purposes.
-PINs: Currently stored in plain text. Recommendation: Implement hashing (e.g., bcrypt) for enhanced security.
-Environment Variables:
-Keep Supabase credentials secure and do not expose them in the codebase.
-Error Handling:
-Ensure that sensitive error details are not exposed to users. Log errors securely for debugging.
-Permissions:
-Run the Deno server with the minimal necessary permissions to enhance securit
+   ```bash
+   git clone https://github.com/yourusername/stellar-ussd-service.git
+   cd stellar-ussd-service
